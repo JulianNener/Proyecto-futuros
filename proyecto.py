@@ -72,4 +72,4 @@ cost_c, cost_t = read_config_file("cfg_file.txt")
 
 # Buscar oportunidades para el spot contra el futuro correspondiente
 print_rates("GGAL.BA", "GGAL/JUN21", cost_c, cost_t)
-#print_rates("ARS=X", "DLR/AGO21", cost)
+#print_rates("ARS=X", "DLR/AGO21", cost_c, cost_t)
