@@ -32,7 +32,7 @@ def get_rates(spot, fwd, cost_c=0, cost_t=0):
 # y si son distintas a las previas las imprime en consola.
 # Cuando las tasas cambian, tambien se fija si hay alguna oportunidad (colocadora > tomadora).
 def print_rates(spot, fwd, cost_c=0, cost_t=0, wait_time=1):
-    colocadora_prev = 0; tomadora_prev = 0
+    colocadora_prev = 0; tomadora_prev = 0 # inicializo las tasas previas (nunca van a ser 0 asi que las primeras siempre se imprimen)
     
     while True:       
         colocadora, tomadora, buy_spot, sell_spot, buy_fwd, sell_fwd = get_rates(spot, fwd, cost_c, cost_t)
