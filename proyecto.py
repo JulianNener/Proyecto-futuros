@@ -2,57 +2,116 @@ import pyRofex
 import yfinance as yf
 import time
 
-pyRofex.initialize(user="USERNAME",
+  pyRofex.initialize(user="USERNAME",
                    password="PASSWORD",
                    account="ACCOUNT",
                    environment=pyRofex.Environment.REMARKET)
 
-# get_rates me devuelve las tasas colocadora y tomadora, y los buy (ask) y sell (bid) de los futuros (fwd) y spot.
-# Separé los costos de transacciones en cost_c y cost_t.
-def get_rates(spot, fwd, cost_c=0, cost_t=0):    
-    ticker_spot = yf.Ticker(spot) # info del spot que me da yahoo finance
-    info_spot = ticker_spot.info
-    buy_spot = info_spot["ask"]
-    sell_spot = info_spot["bid"]
-    
-    info_fwd = pyRofex.get_market_data(ticker=fwd, entries=[pyRofex.MarketDataEntry.OFFERS, pyRofex.MarketDataEntry.BIDS]) # info de futuros que me da Rofex
-    while not info_fwd["marketData"]["OF"] or not info_fwd["marketData"]["BI"]: # si no hay ordenes de compra o venta entonces nunca podria obtener buy_fwd o sell_fwd
-        print("No hay órdenes")
-        time.sleep(5)
-        
-    buy_fwd = info_fwd["marketData"]["OF"][0]["price"]
-    sell_fwd = info_fwd["marketData"]["BI"][0]["price"]
-    
-    colocadora = (sell_fwd - buy_spot - cost_c)/buy_spot
-    tomadora = (buy_fwd - sell_spot - cost_t)/sell_spot
-    
-    return round(colocadora, 6), round(tomadora, 6), buy_spot, sell_spot, buy_fwd, sell_fwd
+tickers_spots = yf.Tickers
+prices_fwd = dict()
+sizes_fwd = dict()
 
-# print_rates se fija si las tasas colocadora y tomadora cambian cada wait_time segundos,
-# y si son distintas a las previas las imprime en consola.
-# Cuando las tasas cambian, tambien se fija si hay alguna oportunidad (colocadora > tomadora).
-def print_rates(spot, fwd, cost_c=0, cost_t=0, wait_time=1):
-    colocadora_prev = 0; tomadora_prev = 0 # inicializo las tasas previas (nunca van a ser 0 asi que las primeras siempre se imprimen)
+def market_data_handler(message):
+
+    prices_fwd[ message["instrumentId"]["symbol"] ] = [ message["marketData"]["OF"][0]["price"],
+                                                        message["marketData"]["BI"][0]["price"] ]
+
+    sizes_fwd[ message["instrumentId"]["symbol"] ] = [ message["marketData"]["OF"][0]["size"],
+                                                       message["marketData"]["BI"][0]["size"] ]
+
+def order_report_handler(message):
+    print("Order Report Message Received: {0}".format(message))
+
+def error_handler(message):
+    print("Error Message Received: {0}".format(message))
+
+def exception_handler(e):
+    print("Exception Occurred: {0}".format(e.message))
+
+pyRofex.init_websocket_connection(market_data_handler, 
+                                  order_report_handler, 
+                                  error_handler,
+                                  exception_handler,
+                                  pyRofex.Environment.REMARKET)
+
+pyRofex.order_report_subscription(environment=pyRofex.Environment.REMARKET)
+
+def get_rates(cost_c=0, cost_t=0):    
+    buy_spot = dict(); sell_spot = dict()
+    for spot in spots:
+        buy_spot[spot] = tickers_spots.tickers[spot].info["ask"]
+        sell_spot[spot] = tickers_spots.tickers[spot].info["bid"]
+    
+    buy_fwd = dict(); sell_fwd = dict()
+    for fwd in forwards:
+        if prices_fwd[fwd][0] and prices_fwd[fwd][1]:
+            buy_fwd[fwd] = prices_fwd[fwd][0]
+            sell_fwd[fwd] = prices_fwd[fwd][1]
+        else:
+            buy_fwd[fwd] = sell_fwd[fwd] = None
+
+    colocadora = []; tomadora = []
+    for i in range(0, len(spots)):
+        spot = spots[i]; fwd = forwards[i]
+        if buy_fwd[fwd] and sell_fwd[fwd]:
+            colocadora.append( round( (sell_fwd[fwd] - buy_spot[spot] - cost_c)/buy_spot[spot], 6 ) )
+            tomadora.append( round( (buy_fwd[fwd] - sell_spot[spot] - cost_t)/sell_spot[spot], 6 ) )
+        else:
+            colocadora.append(None)
+            tomadora.append(None)
+    
+    return colocadora, tomadora, buy_spot, sell_spot, buy_fwd, sell_fwd
+
+def print_rates(colocadora, tomadora):
+    for i in range(0, len(spots)):
+        print(spots[i], "-", forwards[i], " ", colocadora[i], " ", tomadora[i])
+    print("")
+
+def check_opportunities(colocadora, tomadora, buy_spot, sell_spot, buy_fwd, sell_fwd):
+    for i in range(0, len(spots)):
+        if colocadora[i] > tomadora[i]:
+            fwd = forwards[i]; spot = spots[i]
+
+            profit = round((colocadora[i]-tomadora[i])*100, 2)
+            print("** Oportunidad ", spots[i], "-", fwd, " **",
+                  "\nSpot - Comprar a: ", buy_spot[spot], " Vender a: ", sell_spot[spot],
+                  "\nProfit: ", profit, "%\n")
+
+            pyRofex.send_order(ticker=fwd, 
+                               size=sizes_fwd[fwd][0], 
+                               side=pyRofex.Side.BUY, 
+                               order_type=pyRofex.OrderType.LIMIT, 
+                               price=buy_fwd[fwd],
+                               cancel_previous=True)
+
+            pyRofex.send_order(ticker=fwd, 
+                               size=sizes_fwd[fwd][1], 
+                               side=pyRofex.Side.SELL, 
+                               order_type=pyRofex.OrderType.LIMIT, 
+                               price=sell_fwd[fwd],
+                               cancel_previous=True)
+
+def update_rates(cost_c=0, cost_t=0, wait_time=1):
+    colocadora_prev = [0]*len(spots); tomadora_prev = [0]*len(spots)
     
     while True:       
-        colocadora, tomadora, buy_spot, sell_spot, buy_fwd, sell_fwd = get_rates(spot, fwd, cost_c, cost_t)
-
+        colocadora, tomadora, buy_spot, sell_spot, buy_fwd, sell_fwd = get_rates(cost_c, cost_t)
+        
         if (colocadora != colocadora_prev) or (tomadora != tomadora_prev):
-            print(colocadora, "\t", tomadora)
+            print_rates(colocadora, tomadora)
             colocadora_prev = colocadora
             tomadora_prev = tomadora
-            
-            if colocadora > tomadora:
-                profit = round((colocadora-tomadora)*100, 2)
-                print("**Oportunidad** \nFuturo - Comprar a:", buy_fwd, "\tVender a:", sell_fwd,
-                      "\nSpot - Comprar a: ", buy_spot, "\tVender a: ", sell_spot,
-                      "\nProfit: ", profit, "%\n")
+
+            check_opportunities(colocadora, tomadora, buy_spot, sell_spot, buy_fwd, sell_fwd)
             
         time.sleep(wait_time)
 
+def init_tickers(forwards, spots):
+    global tickers_spots
+    tickers_spots = yf.Tickers(' '.join(spots)) 
+    pyRofex.market_data_subscription(tickers=forwards, entries=[pyRofex.MarketDataEntry.BIDS, 
+                                                                pyRofex.MarketDataEntry.OFFERS])
 
-# Si los costos quisieran leerse de algun archivo de configuración, 
-# por ejemplo podría utilizarse una función como esta para el archivo de ejemplo dado.
 def read_config_file(filename):
     cost_c = 0; cost_t = 0
     with open(filename, 'r') as file:
@@ -67,9 +126,8 @@ def read_config_file(filename):
 
 cost_c, cost_t = read_config_file("cfg_file.txt")
 
-# Caso en que no hay órdenes de futuros
-#get_rates("ARS=X", "SOJ.MIN/NOV21") 
+forwards = ["GGAL/JUN21", "DLR/JUN21", "DLR/MAY21"]
+spots = ["GGAL.BA", "ARS=X", "ARS=X"]
 
-# Buscar oportunidades para el spot contra el futuro correspondiente
-print_rates("GGAL.BA", "GGAL/JUN21", cost_c, cost_t)
-#print_rates("ARS=X", "DLR/AGO21", cost_c, cost_t)
+init_tickers(forwards, spots)
+update_rates(cost_c=0, cost_t=0, wait_time=10)
