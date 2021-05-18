@@ -2,9 +2,9 @@ import pyRofex
 import yfinance as yf
 import time
 
-  pyRofex.initialize(user="USERNAME",
-                   password="PASSWORD",
-                   account="ACCOUNT",
+pyRofex.initialize(user="USERNAME",
+                   password="ACCOUNT",
+                   account="PASSWORD",
                    environment=pyRofex.Environment.REMARKET)
 
 tickers_spots = yf.Tickers
@@ -12,12 +12,18 @@ prices_fwd = dict()
 sizes_fwd = dict()
 
 def market_data_handler(message):
-
-    prices_fwd[ message["instrumentId"]["symbol"] ] = [ message["marketData"]["OF"][0]["price"],
-                                                        message["marketData"]["BI"][0]["price"] ]
-
-    sizes_fwd[ message["instrumentId"]["symbol"] ] = [ message["marketData"]["OF"][0]["size"],
-                                                       message["marketData"]["BI"][0]["size"] ]
+    global forwards
+    fwd = message["instrumentId"]["symbol"]
+  
+    # si no hay órdenes en alguno de los futuros lo saco de la lista
+    if not message["marketData"]["OF"] or not message["marketData"]["BI"]:
+        del spots[forwards.index(fwd)]
+        forwards.remove(fwd)
+    else:
+        prices_fwd[fwd] = [ message["marketData"]["OF"][0]["price"],
+                            message["marketData"]["BI"][0]["price"] ]
+        sizes_fwd[fwd] = [ message["marketData"]["OF"][0]["size"],
+                           message["marketData"]["BI"][0]["size"] ]
 
 def order_report_handler(message):
     print("Order Report Message Received: {0}".format(message))
@@ -44,21 +50,16 @@ def get_rates(cost_c=0, cost_t=0):
     
     buy_fwd = dict(); sell_fwd = dict()
     for fwd in forwards:
-        if prices_fwd[fwd][0] and prices_fwd[fwd][1]:
-            buy_fwd[fwd] = prices_fwd[fwd][0]
-            sell_fwd[fwd] = prices_fwd[fwd][1]
-        else:
-            buy_fwd[fwd] = sell_fwd[fwd] = None
+        buy_fwd[fwd] = prices_fwd[fwd][0]
+        sell_fwd[fwd] = prices_fwd[fwd][1]
 
     colocadora = []; tomadora = []
     for i in range(0, len(spots)):
         spot = spots[i]; fwd = forwards[i]
-        if buy_fwd[fwd] and sell_fwd[fwd]:
-            colocadora.append( round( (sell_fwd[fwd] - buy_spot[spot] - cost_c)/buy_spot[spot], 6 ) )
-            tomadora.append( round( (buy_fwd[fwd] - sell_spot[spot] - cost_t)/sell_spot[spot], 6 ) )
-        else:
-            colocadora.append(None)
-            tomadora.append(None)
+
+        colocadora.append( round( (sell_fwd[fwd] - buy_spot[spot] - cost_c)/buy_spot[spot], 6 ) )
+        tomadora.append( round( (buy_fwd[fwd] - sell_spot[spot] - cost_t)/sell_spot[spot], 6 ) )
+
     
     return colocadora, tomadora, buy_spot, sell_spot, buy_fwd, sell_fwd
 
@@ -126,8 +127,9 @@ def read_config_file(filename):
 
 cost_c, cost_t = read_config_file("cfg_file.txt")
 
-forwards = ["GGAL/JUN21", "DLR/JUN21", "DLR/MAY21"]
+# 
+forwards = ["GGAL/JUN21", "NOV.P/MAY21", "DLR/JUN21"]
 spots = ["GGAL.BA", "ARS=X", "ARS=X"]
 
 init_tickers(forwards, spots)
-update_rates(cost_c=0, cost_t=0, wait_time=10)
+update_rates(cost_c=0, cost_t=0, wait_time=1)
