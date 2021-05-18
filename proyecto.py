@@ -8,6 +8,8 @@ pyRofex.initialize(user="USERNAME",
                    environment=pyRofex.Environment.REMARKET)
 
 tickers_spots = yf.Tickers
+
+# diccionarios a ser actualizados por el handler de pyRofex
 prices_fwd = dict()
 sizes_fwd = dict()
 
@@ -59,7 +61,6 @@ def get_rates(cost_c=0, cost_t=0):
 
         colocadora.append( round( (sell_fwd[fwd] - buy_spot[spot] - cost_c)/buy_spot[spot], 6 ) )
         tomadora.append( round( (buy_fwd[fwd] - sell_spot[spot] - cost_t)/sell_spot[spot], 6 ) )
-
     
     return colocadora, tomadora, buy_spot, sell_spot, buy_fwd, sell_fwd
 
@@ -77,7 +78,8 @@ def check_opportunities(colocadora, tomadora, buy_spot, sell_spot, buy_fwd, sell
             print("** Oportunidad ", spots[i], "-", fwd, " **",
                   "\nSpot - Comprar a: ", buy_spot[spot], " Vender a: ", sell_spot[spot],
                   "\nProfit: ", profit, "%\n")
-
+            
+            # mando las órdenes a Rofex usando el tamaño que veo disponible
             pyRofex.send_order(ticker=fwd, 
                                size=sizes_fwd[fwd][0], 
                                side=pyRofex.Side.BUY, 
@@ -112,7 +114,6 @@ def init_tickers(forwards, spots):
     tickers_spots = yf.Tickers(' '.join(spots)) 
     pyRofex.market_data_subscription(tickers=forwards, entries=[pyRofex.MarketDataEntry.BIDS, 
                                                                 pyRofex.MarketDataEntry.OFFERS])
-
 def read_config_file(filename):
     cost_c = 0; cost_t = 0
     with open(filename, 'r') as file:
@@ -127,9 +128,8 @@ def read_config_file(filename):
 
 cost_c, cost_t = read_config_file("cfg_file.txt")
 
-# 
-forwards = ["GGAL/JUN21", "NOV.P/MAY21", "DLR/JUN21"]
+forwards = ["GGAL/JUN21", "DLR/JUN21", "DLR/AGO21"]
 spots = ["GGAL.BA", "ARS=X", "ARS=X"]
 
 init_tickers(forwards, spots)
-update_rates(cost_c=0, cost_t=0, wait_time=1)
+update_rates(cost_c, cost_t, wait_time=1)
